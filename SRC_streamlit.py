@@ -38,6 +38,17 @@ from PIL import Image
 # about dataset section
 st.header("About SRC")
 st.write("""The Singapore Red Cross (SRC) is a homegrown humanitarian organization established in 1949, dedicated to relieving suffering, protecting human lives, and responding to emergencies. As an independent organization within the international Red Cross movement, it serves the vulnerable through blood donor recruitment, a home for the disabled, elder aid, food aid, and transport aid.    """)
+your_repo/
+  SRC_streamlit.py
+  assets/
+    Singapore_Red_Cross.jpg
+from PIL import Image
+from pathlib import Path
+
+img_path = Path(__file__).parent / "assets" / "Singapore_Red_Cross.jpg"
+redcross_image = Image.open(img_path)
+
+st.image(redcross_image, use_container_width=True)
 redcross_image = Image.open("/content/Singapore_Red_Cross.jpg")
 st.image(redcross_image)
 
