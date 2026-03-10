@@ -50,7 +50,335 @@ df = pd.read_csv('/content/SRC_Sentiment_Final_Report.csv')
 # get column and species names
 attributes = df.columns[:-1].tolist()
 sentiment_label = df['sentiment_label'].unique().tolist()
-...
+
+import os
+import pandas as pd
+import matplotlib.pyplot as plt
+import plotly.express as px
+import seaborn as sns
+import streamlit as st
+from PIL import Image
+
+# Page configuration
+st.set_page_config(
+    page_title="SRC Sentiment Dashboard",
+    layout="wide"
+)
+
+st.title("Sentiment Analysis Dashboard")
+
+# File paths
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+IMAGE_PATH = os.path.join(CURRENT_DIR, "Singapore_Red_Cross.jpg")
+CSV_PATH = os.path.join(CURRENT_DIR, "SRC_Sentiment_Full_Analysis.csv")
+
+@st.cache_data
+def load_data():
+    try:
+        df = pd.read_csv(CSV_PATH)
+        
+        # Convert date to standard datetime and extract month/year
+        df['date_published'] = pd.to_datetime(df['date_published'], errors='coerce')
+        df['Month_Year'] = df['date_published'].dt.strftime('%Y-%m') 
+        
+        # Standardize missing categorical data
+        df['keyword_category'] = df['keyword_category'].fillna('Unknown')
+        df['language'] = df['language'].fillna('Unknown')
+        df['source'] = df['source'].fillna('Unknown')
+        
+        return df
+    except FileNotFoundError:
+        return None
+
+df = load_data()
+
+if df is None:
+    st.error(f"Error: CSV file not found at {CSV_PATH}")
+else:
+    # Sidebar setup
+    if os.path.exists(IMAGE_PATH):
+        st.sidebar.image(IMAGE_PATH, use_container_width=True)
+    
+    st.sidebar.header("Navigation")
+    page = st.sidebar.radio("Go to View:", [
+        "1. Sentiment Overview", 
+        "2. Engagement & Platforms", 
+        "3. Keyword & Brand Insights"
+    ])
+
+    st.sidebar.divider()
+    st.sidebar.header("Global Filters")
+    filtered_df = df.copy()
+
+    # Apply sidebar filters dynamically
+    if 'sentiment_label' in df.columns:
+        sentiments = df['sentiment_label'].dropna().unique().tolist()
+        selected_sentiments = st.sidebar.multiselect("Sentiment Score:", options=sentiments, default=sentiments)
+        filtered_df = filtered_df[filtered_df['sentiment_label'].isin(selected_sentiments)]
+
+    if 'source' in df.columns:
+        sources = df['source'].dropna().unique().tolist()
+        selected_sources = st.sidebar.multiselect("Platform/Source:", options=sources, default=sources)
+        filtered_df = filtered_df[filtered_df['source'].isin(selected_sources)]
+
+    if 'date_published' in df.columns and not df['date_published'].isna().all():
+        min_date = df['date_published'].min().date()
+        max_date = df['date_published'].max().date()
+        date_selection = st.sidebar.date_input("Select Date Range:", value=(min_date, max_date), min_value=min_date, max_value=max_date)
+        
+        if len(date_selection) == 2:
+            start_date, end_date = date_selection
+            filtered_df = filtered_df[(filtered_df['date_published'].dt.date >= start_date) & (filtered_df['date_published'].dt.date <= end_date)]
+
+    # Top KPI metrics
+    st.divider()
+    
+    mention_volume = len(filtered_df)
+    total_eng = int(filtered_df['engagement_score'].sum()) if 'engagement_score' in filtered_df else 0
+    eng_rate = f"{(total_eng / mention_volume):.1f}" if mention_volume > 0 else "0.0"
+    
+    pos_count = len(filtered_df[filtered_df['sentiment_label'] == 'Positive'])
+    neg_count = len(filtered_df[filtered_df['sentiment_label'] == 'Negative'])
+    net_sentiment = round(((pos_count - neg_count) / mention_volume) * 100, 1) if mention_volume > 0 else 0
+
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    kpi1.metric("Total Mention Volume", mention_volume)
+    kpi2.metric("Total Engagement Score", f"{total_eng:,}") 
+    kpi3.metric("Avg Engagement Rate", eng_rate)
+    
+    sentiment_color = "normal" if net_sentiment >= 0 else "inverse"
+    kpi4.metric("Net Sentiment Score", f"{net_sentiment}%", delta=f"{net_sentiment}% Net Score", delta_color=sentiment_color)
+    
+    st.divider()
+
+    # Page routing and chart rendering
+    if page == "1. Sentiment Overview":
+        st.info("**Executive Overview:** This dashboard tracks real-time sentiment and engagement for the Singapore Red Cross across news and social media.")
+        st.subheader("Sentiment Distribution & Trends")
+        
+        col_trend, col_pie = st.columns([2, 1])
+        
+        with col_trend:
+            if not filtered_df.empty:
+                trend_data = filtered_df.groupby('Month_Year').size().reset_index(name='Mentions')
+                trend_data = trend_data.sort_values('Month_Year') 
+                
+                fig1 = px.line(trend_data, x='Month_Year', y='Mentions', markers=True, 
+                               title="Mentions Over Time", color_discrete_sequence=['#E41E26'])
+                fig1.update_layout(plot_bgcolor='rgba(0,0,0,0)', xaxis_title="Month", yaxis_title="Volume")
+                st.plotly_chart(fig1, use_container_width=True)
+            
+        with col_pie:
+            if not filtered_df.empty:
+                sent_counts = filtered_df['sentiment_label'].value_counts().reset_index()
+                sent_counts.columns = ['Sentiment', 'Count']
+                
+                fig2 = px.pie(sent_counts, values='Count', names='Sentiment', hole=0.4, 
+                              title="Net Sentiment Distribution",
+                              color_discrete_sequence=px.colors.qualitative.Pastel)
+                st.plotly_chart(fig2, use_container_width=True)
+
+    elif page == "2. Engagement & Platforms":
+        st.subheader("Media & Platform Performance")
+        
+        tab1, tab2 = st.tabs(["Social Media Insights", "News Articles Insights"])
+        
+        with tab1:
+            st.markdown("### Social Media Engagement Score")
+            social_df = filtered_df[~filtered_df['source'].str.contains('Article', case=False, na=False)]
+            
+            if not social_df.empty:
+                # 1. Group by BOTH platform and sentiment
+                plat_data = social_df.groupby(['source', 'sentiment_label'])['engagement_score'].sum().reset_index()
+                
+                # 2. Get the sorting order and the TOTAL engagement per platform
+                total_eng_df = plat_data.groupby('source')['engagement_score'].sum().reset_index()
+                total_eng_df = total_eng_df.sort_values(by='engagement_score', ascending=False)
+                total_order = total_eng_df['source'].tolist()
+                
+                # 3. Calculate the Percentage
+                plat_data['total_plat_eng'] = plat_data.groupby('source')['engagement_score'].transform('sum')
+                
+                plat_data['percentage'] = 0.0
+                mask = plat_data['total_plat_eng'] > 0
+                plat_data.loc[mask, 'percentage'] = (plat_data.loc[mask, 'engagement_score'] / plat_data.loc[mask, 'total_plat_eng']) * 100
+                
+                # Text for inside the bars (Percentage)
+                plat_data['text_label'] = plat_data['percentage'].apply(lambda x: f"{x:.1f}%" if x > 1.0 else "")
+                
+                custom_sentiment_colors = {
+                    'Positive': '#2ecc71', 
+                    'Negative': '#e74c3c', 
+                    'Neutral': '#95a5a6'   
+                }
+                
+                # 4. Plot the stacked bar
+                fig3 = px.bar(plat_data, 
+                              x='source', 
+                              y='percentage', 
+                              color='sentiment_label',
+                              title="Sentiment Breakdown of Engagement (%)",
+                              text='text_label', 
+                              barmode='stack',
+                              color_discrete_map=custom_sentiment_colors,
+                              category_orders={"source": total_order},
+                              labels={
+                                  'text_label': 'Percentage', 
+                                  'engagement_score': 'Total Engagement',
+                                  'source': 'Platform',
+                                  'sentiment_label': 'Sentiment'
+                              },
+                              hover_data={'percentage': False, 'text_label': True, 'engagement_score': True})
+                
+                fig3.update_traces(textposition='inside', textfont=dict(color='white'))
+                
+                # Add the Total Number to the Top of Each Bar
+                for index, row in total_eng_df.iterrows():
+                    # Format the total cleanly
+                    total_val = row['engagement_score']
+                    if total_val >= 1000000:
+                        total_text = f"{total_val/1000000:.1f}M"
+                    elif total_val >= 1000:
+                        total_text = f"{total_val/1000:.1f}K"
+                    else:
+                        total_text = str(int(total_val))
+                        
+                    fig3.add_annotation(
+                        x=row['source'],
+                        y=100, # Pin the text to the 100% mark
+                        text=f"<b>Total: {total_text}</b>",
+                        showarrow=False,
+                        yshift=15, # Shift it up slightly so it floats cleanly above the bar
+                        font=dict(size=12, color="#212529")
+                    )
+                
+                # Lock the Y-axis but expand it slightly to 115 to leave room for the floating total labels
+                fig3.update_layout(
+                    plot_bgcolor='rgba(0,0,0,0)', 
+                    xaxis_title="Platform", 
+                    yaxis_title="Percentage of Engagement (%)",
+                    yaxis=dict(range=[0, 115]) 
+                )
+                
+                st.plotly_chart(fig3, use_container_width=True)
+                
+                st.markdown("#### Trending Social Topics")
+                topic_table = social_df.groupby('keyword_category')[['likes', 'comments', 'shares', 'engagement_score']].sum().reset_index()
+                topic_table = topic_table.sort_values(by='engagement_score', ascending=False)
+                st.dataframe(topic_table, use_container_width=True)
+            else:
+                st.info("No social media data available for the selected filters.")
+
+        with tab2:
+            st.markdown("### News Publisher Volume & Sentiment")
+            articles_df = filtered_df[filtered_df['source'].str.contains('Article', case=False, na=False)]
+            
+            if not articles_df.empty:
+                # --- Top 10 Volume Chart ---
+                outlet_data = articles_df['author'].value_counts().reset_index().head(10)
+                outlet_data.columns = ['News Outlet', 'Article Count']
+                
+                custom_red_gradient = ['#FF9999', '#E41E26', '#990000']
+                
+                fig4 = px.bar(outlet_data, x='News Outlet', y='Article Count', 
+                              title="Top 10 News Outlets by Article Volume",
+                              text_auto=True, 
+                              color='Article Count',
+                              color_continuous_scale=custom_red_gradient) 
+                
+                fig4.update_layout(plot_bgcolor='rgba(0,0,0,0)', xaxis_title="News Outlet", yaxis_title="Number of Articles")
+                st.plotly_chart(fig4, use_container_width=True)
+                
+                # --- 100% Stacked Sentiment Chart with Floating Totals ---
+                st.markdown("#### Sentiment Distribution Across Outlets (%)")
+                sent_outlet = articles_df.groupby(['author', 'sentiment_label']).size().reset_index(name='Count')
+                sent_outlet = sent_outlet[sent_outlet['author'].isin(outlet_data['News Outlet'])]
+                
+                # 1. Get sorting order and TOTAL articles per publisher
+                total_art_df = sent_outlet.groupby('author')['Count'].sum().reset_index()
+                total_art_df = total_art_df.sort_values(by='Count', ascending=False)
+                total_order_art = total_art_df['author'].tolist()
+                
+                # 2. Calculate the Percentage
+                sent_outlet['total_articles'] = sent_outlet.groupby('author')['Count'].transform('sum')
+                
+                sent_outlet['percentage'] = 0.0
+                mask = sent_outlet['total_articles'] > 0
+                sent_outlet.loc[mask, 'percentage'] = (sent_outlet.loc[mask, 'Count'] / sent_outlet.loc[mask, 'total_articles']) * 100
+                
+                # Text for inside the bars (Percentage)
+                sent_outlet['text_label'] = sent_outlet['percentage'].apply(lambda x: f"{x:.1f}%" if x > 1.0 else "")
+                
+                # 3. Plot the 100% stacked bar
+                fig5 = px.bar(sent_outlet, 
+                              x='author', 
+                              y='percentage', 
+                              color='sentiment_label',
+                              title="Sentiment Breakdown by Top Publishers",
+                              text='text_label',
+                              barmode='stack',
+                              category_orders={"author": total_order_art},
+                              color_discrete_map={
+                                  'Positive': '#2ecc71', # Bright Green
+                                  'Negative': '#e74c3c', # Bright Red
+                                  'Neutral': '#95a5a6'   # Grey
+                              },
+                              labels={
+                                  'text_label': 'Percentage', 
+                                  'Count': 'Total Articles',
+                                  'author': 'News Outlet',
+                                  'sentiment_label': 'Sentiment'
+                              },
+                              hover_data={'percentage': False, 'text_label': True, 'Count': True})
+                
+                fig5.update_traces(textposition='inside', textfont=dict(color='white'))
+                
+                # 4. Add the Total Number to the Top of Each Bar
+                for index, row in total_art_df.iterrows():
+                    total_val = row['Count']
+                    
+                    fig5.add_annotation(
+                        x=row['author'],
+                        y=100, # Pin the text to the 100% mark
+                        text=f"<b>Total: {int(total_val)}</b>",
+                        showarrow=False,
+                        yshift=15, # Shift it up slightly above the bar
+                        font=dict(size=12, color="#212529")
+                    )
+                
+                # Lock Y-axis and expand to 115 to leave room for the labels
+                fig5.update_layout(
+                    plot_bgcolor='rgba(0,0,0,0)', 
+                    xaxis_title="News Outlet", 
+                    yaxis_title="Percentage of Articles (%)",
+                    yaxis=dict(range=[0, 115]) 
+                )
+                
+                st.plotly_chart(fig5, use_container_width=True)
+            else:
+                st.info("No news article data available for the selected filters.")
+
+    elif page == "3. Keyword & Brand Insights":
+        st.subheader("Brand & Entity Mentions")
+        
+        if not filtered_df.empty:
+            icrc_mentions = filtered_df['full_content_eng'].str.contains('ICRC|International Committee', case=False, na=False).sum()
+            ifrc_mentions = filtered_df['full_content_eng'].str.contains('IFRC|International Federation', case=False, na=False).sum()
+            src_mentions = filtered_df['full_content_eng'].str.contains('SRC|Singapore Red Cross', case=False, na=False).sum()
+            
+            brand_data = pd.DataFrame({
+                "Brand/Entity": ["Singapore Red Cross (SRC)", "ICRC", "IFRC"],
+                "Total Mentions": [src_mentions, icrc_mentions, ifrc_mentions]
+            })
+            st.table(brand_data)
+            
+        st.subheader("Keyword / Topic Volume by Month")
+        if not filtered_df.empty:
+            topic_trend = filtered_df.groupby(['Month_Year', 'keyword_category']).size().reset_index(name='Volume')
+            fig6 = px.area(topic_trend, x="Month_Year", y="Volume", color="keyword_category",
+                           title="Mentions by Topic Over Time", line_group="keyword_category")
+            fig6.update_layout(plot_bgcolor='rgba(0,0,0,0)', xaxis_title="Month", yaxis_title="Volume")
+            st.plotly_chart(fig6, use_container_width=True)
 
 import streamlit as st
 import pandas as pd
