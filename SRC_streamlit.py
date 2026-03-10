@@ -58,10 +58,10 @@ import plotly.express as px
 
 st.set_page_config(layout="wide")
 
-# ---- Load data (replace with your actual load) ----
-# df = pd.read_csv("your_file.csv")
+# Load data 
+# df = pd.read_csv("SRC_Sentiment_Final_Report.csv.csv")
 # If Excel:
-# df = pd.read_excel("SRC_Sentiment_Final_Report.xlsx", sheet_name="...")
+# df = pd.read_excel("SRC_Sentiment_Final_Report.xlsx")
 
 # Example: assume df already exists
 # Required columns: date_published, source
