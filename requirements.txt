@@ -6,9 +6,7 @@ seaborn
 matplotlib
 openpyxl
 selenium 
-chromium 
-chromium-driver
-ffmpeg
+
 beautifulsoup4
 lxml
 scrapy
