@@ -1,4 +1,4 @@
-
+requests
 streamlit
 pandas
 plotly
@@ -9,3 +9,11 @@ selenium
 chromium 
 chromium-driver
 ffmpeg
+beautifulsoup4
+lxml
+scrapy
+streamlit>=1.32.0
+altair
+openai-whisper 
+pytest 
+python-dotenv
