@@ -5,3 +5,7 @@ plotly
 seaborn
 matplotlib
 openpyxl
+selenium 
+chromium 
+chromium-driver
+ffmpeg
